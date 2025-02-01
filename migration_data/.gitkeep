@@ -1,0 +1,9 @@
+
+migration_data/
+
+# Docker volumes
+docker-volumes/
+
+# Local development
+.env
+.env.local
