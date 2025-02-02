@@ -1,9 +1,23 @@
+#!/usr/bin/env python3
+"""
+Web Crawler for Migration
+
+This script crawls a specified domain starting from a given URL,
+downloads HTML pages and associated assets (CSS, JavaScript, images),
+and saves them to designated output directories for migration purposes.
+It also supports limiting the crawl depth via a command-line argument.
+"""
+
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 import os
 import argparse
 import random
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
 # Configuration
 DOMAIN_CONFIG = {
@@ -26,7 +40,7 @@ USER_AGENTS = [
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 ]
 
-# WordPress mapping templates
+# WordPress mapping templates (for potential future use)
 WP_MAPPING = {
     'page': {
         'post_type': 'page',
@@ -42,11 +56,21 @@ def create_directory(path):
     """Create directory if it doesn't exist"""
     if not os.path.exists(path):
         os.makedirs(path)
-        print(f"Created directory: {path}")
+        logging.info(f"Created directory: {path}")
     return os.path.abspath(path)
 
-def crawl_domain(domain_config):
-    """Crawl a single domain"""
+def get_page_filename(url):
+    """Generate a filename for a given URL path"""
+    parsed = urlparse(url)
+    path = parsed.path.strip('/')
+    if not path:
+        return "index.html"
+    # Append .html if not already present
+    filename = f"{path}.html" if not path.endswith('.html') else path
+    return filename
+
+def crawl_domain(domain_config, max_depth):
+    """Crawl a single domain with an optional maximum depth for crawling"""
     start_url = domain_config['url']
     output_path = domain_config['output_path']
     
@@ -55,50 +79,51 @@ def crawl_domain(domain_config):
     create_directory(os.path.join(output_path, 'pages'))
     create_directory(os.path.join(output_path, 'images'))
     create_directory(os.path.join(output_path, 'metadata'))
-    visited = set()
-    to_visit = [start_url]
-    css_files = set()
+    
+    visited = {}
+    to_visit = [(start_url, 0)]  # tuple (url, depth)
     
     while to_visit:
-        url = to_visit.pop(0)
+        url, depth = to_visit.pop(0)
         if url in visited:
             continue
-        visited.add(url)
+        if depth > max_depth:
+            continue
+        visited[url] = True
         
-        # Create URL-specific directories
         parsed_url = urlparse(url)
-        page_path = os.path.join(output_path, 'pages', parsed_url.path[1:])
+        page_filename = get_page_filename(url)
+        page_filepath = os.path.join(output_path, 'pages', page_filename)
         asset_path = os.path.join(output_path, 'assets', parsed_url.netloc)
-        create_directory(page_path)
+        create_directory(os.path.dirname(page_filepath))
         create_directory(asset_path)
         
-        # Random user-agent
         headers = {'User-Agent': random.choice(USER_AGENTS)}
-        
         try:
             response = requests.get(url, headers=headers, timeout=10)
             response.raise_for_status()
             
             # Save page content
-            with open(os.path.join(output_path, 'pages', urlparse(url).path[1:] + '.html'), 'w', encoding='utf-8') as f:
+            with open(page_filepath, 'w', encoding='utf-8') as f:
                 f.write(response.text)
-                
-            print(f"Crawled: {url}")
+            logging.info(f"Crawled: {url}")
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
             
             # Download CSS assets
-            soup = BeautifulSoup(response.text, 'html.parser')
             for css in soup.find_all('link', rel='stylesheet'):
-                css_url = urljoin(url, css['href'])
+                css_url = urljoin(url, css.get('href'))
                 try:
                     css_resp = requests.get(css_url, headers=headers, timeout=5)
                     css_resp.raise_for_status()
-                    css_path = os.path.join(asset_path, 'css', os.path.basename(css_url))
-                    create_directory(os.path.dirname(css_path))
+                    css_dir = os.path.join(asset_path, 'css')
+                    create_directory(css_dir)
+                    css_path = os.path.join(css_dir, os.path.basename(css_url))
                     with open(css_path, 'w', encoding='utf-8') as f:
                         f.write(css_resp.text)
-                    print(f"Downloaded CSS: {css_url}")
+                    logging.info(f"Downloaded CSS: {css_url}")
                 except Exception as e:
-                    print(f"Error downloading CSS {css_url}: {str(e)}")
+                    logging.warning(f"Error downloading CSS {css_url}: {str(e)}")
             
             # Download JavaScript assets
             for js in soup.find_all('script', src=True):
@@ -106,58 +131,62 @@ def crawl_domain(domain_config):
                 try:
                     js_resp = requests.get(js_url, headers=headers, timeout=5)
                     js_resp.raise_for_status()
-                    js_path = os.path.join(asset_path, 'js', os.path.basename(js_url))
-                    create_directory(os.path.dirname(js_path))
+                    js_dir = os.path.join(asset_path, 'js')
+                    create_directory(js_dir)
+                    js_path = os.path.join(js_dir, os.path.basename(js_url))
                     with open(js_path, 'w', encoding='utf-8') as f:
                         f.write(js_resp.text)
-                    print(f"Downloaded JS: {js_url}")
+                    logging.info(f"Downloaded JS: {js_url}")
                 except Exception as e:
-                    print(f"Error downloading JS {js_url}: {str(e)}")
+                    logging.warning(f"Error downloading JS {js_url}: {str(e)}")
             
-            # Download Image assets
+            # Download image assets
             for img in soup.find_all('img', src=True):
                 img_url = urljoin(url, img['src'])
                 try:
                     img_resp = requests.get(img_url, headers=headers, timeout=5, stream=True)
                     img_resp.raise_for_status()
-                    img_path = os.path.join(asset_path, 'images', os.path.basename(urlparse(img_url).path))
-                    create_directory(os.path.dirname(img_path))
+                    img_dir = os.path.join(asset_path, 'images')
+                    create_directory(img_dir)
+                    img_name = os.path.basename(urlparse(img_url).path)
+                    if not img_name:
+                        img_name = "image.jpg"
+                    img_path = os.path.join(img_dir, img_name)
                     with open(img_path, 'wb') as f:
                         for chunk in img_resp.iter_content(1024):
                             f.write(chunk)
-                    print(f"Downloaded image: {img_url}")
+                    logging.info(f"Downloaded image: {img_url}")
                 except Exception as e:
-                    print(f"Error downloading image {img_url}: {str(e)}")
+                    logging.warning(f"Error downloading image {img_url}: {str(e)}")
             
-            # Find all links
+            # Find all internal links and queue them for crawling
             for link in soup.find_all('a', href=True):
                 full_url = urljoin(start_url, link['href'])
-                parsed = urlparse(full_url)
-                
-                # Check if URL belongs to the current domain
-                if parsed.netloc == urlparse(start_url).netloc:
-                    if full_url not in visited and full_url not in to_visit:
-                        to_visit.append(full_url)
-                        print(f"Found: {full_url}")
+                parsed_link = urlparse(full_url)
+                if parsed_link.netloc == urlparse(start_url).netloc:
+                    if full_url not in visited:
+                        to_visit.append((full_url, depth + 1))
+                        logging.info(f"Found link: {full_url}")
                         
         except requests.exceptions.RequestException as e:
-            print(f"Error crawling {url}: {str(e)}")
+            logging.error(f"Error crawling {url}: {str(e)}")
             continue
 
 def main():
     parser = argparse.ArgumentParser(description='Web Crawler for migration')
     parser.add_argument('--domain', type=str, required=True, choices=['tdr_bio', 'danakosha'],
-                      help='Domain to crawl (tdr_bio or danakosha)')
+                        help='Domain to crawl (tdr_bio or danakosha)')
+    parser.add_argument('--max_depth', type=int, default=2, help='Maximum crawl depth')
     args = parser.parse_args()
     
     domain_config = DOMAIN_CONFIG.get(args.domain)
     if not domain_config:
-        print("Invalid domain specified")
+        logging.error("Invalid domain specified")
         return
         
-    print(f"Starting crawl for: {args.domain}")
-    crawl_domain(domain_config)
-    print("Crawl completed successfully")
+    logging.info(f"Starting crawl for: {args.domain} with max depth {args.max_depth}")
+    crawl_domain(domain_config, args.max_depth)
+    logging.info("Crawl completed successfully")
 
 if __name__ == "__main__":
     main()
