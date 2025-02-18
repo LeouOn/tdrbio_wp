@@ -59,15 +59,19 @@ def create_directory(path):
         logging.info(f"Created directory: {path}")
     return os.path.abspath(path)
 
+def sanitize_filename(filename):
+    """Sanitize filename by removing non-ASCII characters"""
+    return ''.join(char for char in filename if ord(char) < 128)
+
 def get_page_filename(url):
     """Generate a filename for a given URL path"""
     parsed = urlparse(url)
     path = parsed.path.strip('/')
     if not path:
-        return "index.html"
-    # Append .html if not already present
-    filename = f"{path}.html" if not path.endswith('.html') else path
-    return filename
+        filename = "index.html"
+    else:
+        filename = f"{path}.html" if not path.endswith('.html') else path
+    return sanitize_filename(filename)
 
 def crawl_domain(domain_config, max_depth):
     """Crawl a single domain with an optional maximum depth for crawling"""
@@ -118,9 +122,13 @@ def crawl_domain(domain_config, max_depth):
                     css_resp.raise_for_status()
                     css_dir = os.path.join(asset_path, 'css')
                     create_directory(css_dir)
-                    css_path = os.path.join(css_dir, os.path.basename(css_url))
-                    with open(css_path, 'w', encoding='utf-8') as f:
-                        f.write(css_resp.text)
+                    css_filename = os.path.basename(urlparse(css_url).path)
+                    css_path = os.path.join(css_dir, css_filename)
+                    try:
+                        with open(css_path, 'w', encoding='utf-8') as f:
+                            f.write(css_resp.text)
+                    except FileNotFoundError:
+                        logging.error(f"File not found when saving CSS: {css_url}")
                     logging.info(f"Downloaded CSS: {css_url}")
                 except Exception as e:
                     logging.warning(f"Error downloading CSS {css_url}: {str(e)}")
@@ -133,9 +141,13 @@ def crawl_domain(domain_config, max_depth):
                     js_resp.raise_for_status()
                     js_dir = os.path.join(asset_path, 'js')
                     create_directory(js_dir)
-                    js_path = os.path.join(js_dir, os.path.basename(js_url))
-                    with open(js_path, 'w', encoding='utf-8') as f:
-                        f.write(js_resp.text)
+                    js_filename = os.path.basename(urlparse(js_url).path)
+                    js_path = os.path.join(js_dir, js_filename)
+                    try:
+                        with open(js_path, 'w', encoding='utf-8') as f:
+                            f.write(js_resp.text)
+                    except FileNotFoundError:
+                        logging.error(f"File not found when saving JS: {js_url}")
                     logging.info(f"Downloaded JS: {js_url}")
                 except Exception as e:
                     logging.warning(f"Error downloading JS {js_url}: {str(e)}")
@@ -152,9 +164,12 @@ def crawl_domain(domain_config, max_depth):
                     if not img_name:
                         img_name = "image.jpg"
                     img_path = os.path.join(img_dir, img_name)
-                    with open(img_path, 'wb') as f:
-                        for chunk in img_resp.iter_content(1024):
-                            f.write(chunk)
+                    try:
+                        with open(img_path, 'wb') as f:
+                            for chunk in img_resp.iter_content(1024):
+                                f.write(chunk)
+                    except FileNotFoundError:
+                        logging.error(f"File not found when saving image: {img_url}")
                     logging.info(f"Downloaded image: {img_url}")
                 except Exception as e:
                     logging.warning(f"Error downloading image {img_url}: {str(e)}")
@@ -170,7 +185,13 @@ def crawl_domain(domain_config, max_depth):
                         
         except requests.exceptions.RequestException as e:
             logging.error(f"Error crawling {url}: {str(e)}")
-            continue
+            if isinstance(e, requests.exceptions.Timeout):
+                logging.warning(f"Timeout occurred while crawling {url}. Retrying...")
+                time.sleep(5)  # Wait 5 seconds before retrying
+                response = requests.get(url, headers=headers, timeout=10)
+                response.raise_for_status()
+            else:
+                continue
 
 def main():
     parser = argparse.ArgumentParser(description='Web Crawler for migration')

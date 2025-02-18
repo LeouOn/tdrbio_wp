@@ -136,4 +136,9 @@
    - Check error logs
    - Test in staging environment
 
+## Future Iterations
+
+- Use WP-CLI for command-line management
+- Ensure the site is optimized for SEO and mobile devices
+
 This document outlines the technical requirements and setup for Tulku Dakpa Rinpoche's WordPress site, ensuring a secure, performant, and maintainable platform for sharing his teachings.

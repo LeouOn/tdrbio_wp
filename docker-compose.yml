@@ -17,6 +17,7 @@ services:
       - db
     volumes:
       - ./wp-content:/var/www/html/wp-content
+      - ./wordpress/wordpress:/var/www/html
     ports:
       - "8000:80"
     environment:

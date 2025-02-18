@@ -7,12 +7,17 @@ OUTPUT_FILE = "migration_import.xml"
 
 def gather_pages(pages_dir):
     pages = []
+    supported_file_types = ['.html', '.md', '.txt']
     for root, _, files in os.walk(pages_dir):
         for file in files:
-            if file.endswith(".html"):
+            if any(file.endswith(ft) for ft in supported_file_types):
                 filepath = os.path.join(root, file)
-                with open(filepath, "r", encoding="utf-8") as f:
-                    content = f.read()
+                try:
+                    with open(filepath, "r", encoding="utf-8") as f:
+                        content = f.read()
+                except Exception as e:
+                    logging.error(f"Error reading file {filepath}: {str(e)}")
+                    continue
                 title = os.path.splitext(file)[0]
                 pages.append({"title": title, "content": content, "filepath": filepath})
     return pages

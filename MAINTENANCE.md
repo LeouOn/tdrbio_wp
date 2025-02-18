@@ -106,4 +106,9 @@
    - Track key metrics
    - Use data to improve content
 
+## Future Iterations
+
+- Use WP-CLI for command-line management
+- Ensure the site is optimized for SEO and mobile devices
+
 This maintenance guide ensures the website remains secure, performant, and up-to-date, providing a reliable platform for sharing Tulku Dakpa Rinpoche's teachings.
